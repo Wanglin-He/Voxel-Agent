@@ -1,0 +1,8 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/hough-tangent/.venv/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}/hough-tangent"],
+
+  // Homebrew 的 git 在这台机器上推不动 https（见 README 末尾），指向系统自带的那个。
+  "git.path": "/usr/bin/git"
+}
