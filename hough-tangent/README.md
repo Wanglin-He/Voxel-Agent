@@ -51,6 +51,15 @@ cd ~/Projects/Voxel-Agent/hough-tangent
 
 **只是同一块板子重拍**——什么都不用改，直接跑。程序会先把整段完整过一遍，统计出哪些格位真的有盘，再据此渲染。
 
+**一次跑多段**：
+
+```bash
+./batch.sh ~/Desktop/结果文件夹 ~/Desktop/a.mov ~/Desktop/b.mov ~/Desktop/c.mov
+```
+
+挨个渲染进那个文件夹。缺文件会先报出来再退出，不会跑到一半才发现。额外参数放 `--` 后面：
+`./batch.sh 输出 a.mov b.mov -- --stride 30`
+
 **阵列不是 4×4**：
 
 ```bash
