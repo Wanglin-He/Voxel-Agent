@@ -7,9 +7,14 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from .validate import DiscProfile, filter_candidates, measure
+from .validate import DEFAULT_PROFILE, DiscProfile, filter_candidates, measure
 
 _HAS_ALT = hasattr(cv2, "HOUGH_GRADIENT_ALT")
+
+# How far the guided pass may fall below the frame's own confirmed discs.
+RELAX_RADIAL = 0.55
+REF_RADIAL_FRAC = 0.45
+REF_CONTRAST_FRAC = 0.35
 
 
 @dataclass
@@ -153,6 +158,7 @@ def refine_in_roi(
     param1: float = 100.0,
     param2: tuple[float, ...] = (26.0, 18.0, 13.0),
     profile: DiscProfile | None = None,
+    ref: dict[str, float] | None = None,
 ) -> np.ndarray | None:
     """Look again for one disc, in a small window around where we expect it.
 
@@ -190,11 +196,20 @@ def refine_in_roi(
         return None
     best = cand[ok][np.argmin(d[ok])]
 
-    prof = profile or DiscProfile(min_radial_support=0.20, min_contrast=8.0, max_saturation=110.0)
+    prof = profile or DEFAULT_PROFILE
     m = measure(bgr, gray, best.reshape(1, 3), prof)
+    # A tilted disc projects to an ellipse and loses rim support, so the guided
+    # pass has to accept less of it -- but it must still look like the discs this
+    # frame already confirmed.  Fixed low thresholds here will cheerfully invent
+    # a disc out of a blank wall.
+    min_radial = prof.min_radial_support * RELAX_RADIAL
+    min_contrast = prof.min_contrast
+    if ref is not None:
+        min_radial = max(min_radial, ref["radial"] * REF_RADIAL_FRAC)
+        min_contrast = max(min_contrast, ref["contrast"] * REF_CONTRAST_FRAC)
     if (
-        m["radial"][0] < prof.min_radial_support
-        or m["contrast"][0] < prof.min_contrast
+        m["radial"][0] < min_radial
+        or m["contrast"][0] < min_contrast
         or m["saturation"][0] > prof.max_saturation
     ):
         return None

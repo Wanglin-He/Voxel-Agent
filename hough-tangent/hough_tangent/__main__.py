@@ -55,19 +55,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the guided second look at cells the global pass missed",
     )
     p.add_argument(
-        "--prescan",
-        type=int,
-        default=60,
-        help="frames sampled up front to learn which cells hold a disc; "
-        "a 4x4 lattice does not promise 16 discs",
-    )
-    p.add_argument(
         "--cells",
         type=_cells,
         default=None,
         metavar="1111,1011,...",
         help="state the occupancy yourself, one digit per cell, rows "
-        "comma separated; skips the prescan",
+        "comma separated; overrides what the analysis pass concluded",
     )
 
     g = p.add_argument_group("resolution")
@@ -210,7 +203,6 @@ def main(argv: list[str] | None = None) -> int:
         gate_frac=args.gate,
         min_observed=args.min_observed,
         max_coast=args.max_coast,
-        prescan=args.prescan,
         cells=args.cells,
         refine=not args.no_refine,
         smooth=not args.no_smooth,

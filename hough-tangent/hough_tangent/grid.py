@@ -285,7 +285,7 @@ class GridTracker:
         min_observed: int = 6,
         max_coast: int = 20,
         occupancy_alpha: float = 0.05,
-        vacancy_threshold: float = 0.15,
+        vacancy_threshold: float = 0.5,
         occupancy_warmup: int = 40,
     ) -> None:
         self.rows = rows
@@ -300,9 +300,11 @@ class GridTracker:
         self.model: GridModel | None = None
         self.coasting = 0
         self.generation = 0  # bumps on every fresh lock, so filters can reset
-        # A 4x4 lattice does not promise 16 discs: this board leaves two cells
-        # empty.  Learn which cells are never occupied instead of inventing a
-        # disc for every node.
+        # A 4x4 lattice does not promise 16 discs: these boards leave anywhere
+        # from zero to four cells empty.  Learn which cells are never occupied
+        # instead of inventing a disc for every node.  Measured over six clips,
+        # an occupied cell is seen on >=97% of frames and an empty one on <=20%,
+        # so the halfway mark separates them with room to spare.
         self.occupancy = np.zeros(rows * cols)
         self.locked_frames = 0
         self.forced_occupied: np.ndarray | None = None

@@ -91,6 +91,24 @@ def measure(
     return {"radial": radial, "contrast": contrast, "saturation": saturation}
 
 
+def disc_reference(
+    bgr: np.ndarray, gray: np.ndarray, circles: np.ndarray, profile: DiscProfile = DEFAULT_PROFILE
+) -> dict[str, float] | None:
+    """What a confirmed disc looks like in this frame, for the guided pass to match.
+
+    Absolute thresholds cannot serve both a white disc on a black board and the
+    same disc against a white wall.  Measuring the discs we already trust in the
+    very same frame calibrates the guided pass to the scene instead.
+    """
+    if len(circles) < 3:
+        return None
+    m = measure(bgr, gray, circles, profile)
+    return {
+        "contrast": float(np.median(m["contrast"])),
+        "radial": float(np.median(m["radial"])),
+    }
+
+
 def _modal_radius(r: np.ndarray, tol: float) -> float:
     """Radius shared by the largest group of candidates (all discs are alike)."""
     if len(r) == 0:
