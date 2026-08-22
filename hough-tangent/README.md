@@ -1,6 +1,6 @@
 # hough-tangent
 
-对视频里的圆盘阵列做霍夫圆检测，用**外公切线**把主体外围精确框选成一个尖角多边形。
+对视频里的圆盘阵列做霍夫圆检测，用**外公切线**把主体外围框成一个尖角多边形，最外圈的每个圆盘都被切到。
 
 算法怎么设计的、每一步在解决什么问题，都写在 [hough_tangent/README.md](hough_tangent/README.md)。这份只讲怎么跑。
 
@@ -79,6 +79,7 @@ cd ~/Projects/Voxel-Agent/hough-tangent
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
+| `--outline ring\|hull` | `ring` | `ring` 沿最外圈逐个外切，每个外圈圆都被切到；`hull` 是凸包，只切到够得着边的那几个 |
 | `--corners sharp\|round` | `sharp` | 拐角走切线交点（尖角）还是沿圆弧 |
 | `--margin-frac F` | `0` | 框往外扩，单位是盘半径的倍数。盘倾斜时想把圆柱侧壁也圈进去就调这个，`0.1` 左右 |
 | `--tangent-extend PX` | `0` | 把切线延长出切点若干像素，视觉上强调"这是切线" |

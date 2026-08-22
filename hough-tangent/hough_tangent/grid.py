@@ -44,6 +44,21 @@ class GridModel:
         return divmod(k, self.cols)  # (v, u)
 
 
+def ring_order(rows: int, cols: int) -> list[int]:
+    """Perimeter cell ids in cyclic order: top row, right column, bottom, left."""
+    if rows < 1 or cols < 1:
+        return []
+    if rows == 1:
+        return list(range(cols))
+    if cols == 1:
+        return [v * cols for v in range(rows)]
+    top = [u for u in range(cols)]
+    right = [v * cols + (cols - 1) for v in range(1, rows)]
+    bottom = [(rows - 1) * cols + u for u in range(cols - 2, -1, -1)]
+    left = [v * cols for v in range(rows - 2, 0, -1)]
+    return top + right + bottom + left
+
+
 def _median_nn(pts: np.ndarray) -> float:
     d = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=2)
     np.fill_diagonal(d, np.inf)

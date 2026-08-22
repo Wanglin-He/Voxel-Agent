@@ -6,7 +6,7 @@ For voxel robot.
 
 ### [`hough-tangent/`](hough-tangent/)
 
-对视频里的圆盘阵列做霍夫圆检测，用**外公切线**把主体外围精确框选成一个尖角多边形。
+对视频里的圆盘阵列做霍夫圆检测，用**外公切线**把主体外围框成一个尖角多边形，最外圈的每个圆盘都被切到。
 
 ```bash
 cd hough-tangent
@@ -18,7 +18,7 @@ cd hough-tangent
 见 [hough-tangent/hough_tangent/README.md](hough-tangent/hough_tangent/README.md)。
 
 在这段 4×4 电机阵列素材上的实测：1830 帧全程锁定，每帧 14/14 个圆盘全部真实检出，
-零帧靠外推撑着。
+零帧靠外推撑着；轮廓与外圈 12 个圆盘的最大缝隙 0.93px，从未切进任何圆盘。
 
 ---
 

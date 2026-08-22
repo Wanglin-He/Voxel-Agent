@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .grid import GridTracker, initialise
-from .hull import hull_of_disks
+from .grid import GridTracker, initialise, ring_order
+from .hull import hull_of_disks, tangent_ring
 
 TWO_PI = 2.0 * np.pi
 _failures: list[str] = []
@@ -101,6 +101,92 @@ def test_sharp_corners() -> None:
     check("sharp square is a 4-gon", len(poly) == 4, f"{len(poly)} vertices")
 
 
+def _dist_to_polyline(poly: np.ndarray, pt: np.ndarray) -> float:
+    a = poly
+    b = np.roll(poly, -1, axis=0)
+    e = b - a
+    t = np.clip(((pt - a) * e).sum(1) / np.maximum((e**2).sum(1), 1e-12), 0.0, 1.0)
+    return float(np.hypot(*(pt - (a + t[:, None] * e)).T).min())
+
+
+def _ring_gaps(c: np.ndarray, r: np.ndarray, order: list, sharp: bool) -> np.ndarray:
+    """Signed gap per disk: 0 = touched, >0 = the outline never reaches it,
+    <0 = the outline cuts into it."""
+    poly = tangent_ring(c, r, order).polyline(0.25, sharp=sharp)
+    return np.array([_dist_to_polyline(poly, c[k]) - r[k] for k in order])
+
+
+def test_tangent_ring_touches_everything() -> None:
+    """Ring mode must reach every disk on the ring, to a bound we can state.
+
+    Where the ring turns outward the outline touches exactly.  Where a disk sits
+    recessed the turn goes inward, and the crossing of its two tangents stands
+    off the disk by exactly ``r * (sec(turn / 2) - 1)`` -- you cannot have both a
+    simple polygon and exact tangency there.  Assert that bound rather than some
+    picked number, so the check keeps meaning if the geometry changes.
+    """
+    rng = np.random.default_rng(31)
+    worst_excess, worst_cut, worst_convex = -np.inf, np.inf, 0.0
+    worst_bound = 0.0
+    for _ in range(120):
+        rows, cols = 4, 4
+        order = ring_order(rows, cols)
+        c, r = [], []
+        for k in range(rows * cols):
+            v, u = divmod(k, cols)
+            c.append([100.0 * u + rng.normal(0, 9), 100.0 * v + rng.normal(0, 9)])
+            r.append(rng.uniform(30, 38))
+        c, r = np.array(c), np.array(r)
+        ring = tangent_ring(c, r, order)
+        poly = ring.polyline(0.25, sharp=True)
+        for i, k in enumerate(order):
+            gap = _dist_to_polyline(poly, c[k]) - r[k]
+            sweep = ring.arcs[i].sweep
+            if sweep >= 0.0:
+                worst_convex = max(worst_convex, abs(gap))
+            else:
+                bound = r[k] * (1.0 / np.cos(abs(sweep) / 2.0) - 1.0)
+                worst_excess = max(worst_excess, gap - bound)
+                worst_bound = max(worst_bound, bound)
+            worst_cut = min(worst_cut, gap)
+    check("outward turns touch exactly", worst_convex < 1e-6, f"max error {worst_convex:.2e} px")
+    check(
+        "recessed disks stand off by no more than r*(sec(turn/2)-1)",
+        worst_excess < 1e-6,
+        f"worst overshoot {worst_excess:.2e} px, bound reached {worst_bound:.2f} px",
+    )
+    check("ring never cuts into a disk", worst_cut > -1e-6, f"deepest cut {worst_cut:.2e} px")
+
+
+def test_ring_beats_hull_on_a_recessed_disk() -> None:
+    """Three disks with the middle one pulled inward: the hull edge skips it."""
+    c = np.array([[0.0, 0.0], [100.0, 18.0], [200.0, 0.0], [200.0, 200.0], [0.0, 200.0]])
+    r = np.full(5, 40.0)
+    order = [0, 1, 2, 3, 4]
+
+    hull_poly = hull_of_disks(c, r).polyline(0.25, sharp=True)
+    hull_gap = _dist_to_polyline(hull_poly, c[1]) - r[1]
+    ring_gap = _dist_to_polyline(tangent_ring(c, r, order).polyline(0.25, sharp=True), c[1]) - r[1]
+    check("hull misses the recessed disk", hull_gap > 5.0, f"gap {hull_gap:.2f} px")
+    check("ring reaches the recessed disk", abs(ring_gap) < 1.0, f"gap {ring_gap:.3f} px")
+
+
+def test_ring_turn_directions() -> None:
+    """Turns must sum to a full revolution, and dip negative only where recessed."""
+    c = np.array([[0.0, 0.0], [100.0, 18.0], [200.0, 0.0], [200.0, 200.0], [0.0, 200.0]])
+    r = np.full(5, 40.0)
+    ring = tangent_ring(c, r, [0, 1, 2, 3, 4])
+    total = sum(a.sweep for a in ring.arcs)
+    check(
+        "ring turns sum to one revolution",
+        abs(total - 2 * np.pi) < 1e-9,
+        f"{np.degrees(total):.4f} deg",
+    )
+    check(
+        "only the recessed disk turns the other way", sum(1 for a in ring.arcs if a.sweep < 0) == 1
+    )
+
+
 def test_hull_shapes() -> None:
     square = hull_of_disks(
         np.array([[0.0, 0.0], [100.0, 0.0], [0.0, 100.0], [100.0, 100.0]]), np.full(4, 20.0)
@@ -184,6 +270,9 @@ def main() -> int:
         test_hull_is_tangent,
         test_hull_contains_every_disk,
         test_sharp_corners,
+        test_tangent_ring_touches_everything,
+        test_ring_beats_hull_on_a_recessed_disk,
+        test_ring_turn_directions,
         test_hull_shapes,
         test_grid_initialise,
         test_tracker_learns_vacancies,

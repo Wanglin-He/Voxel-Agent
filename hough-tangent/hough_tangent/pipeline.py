@@ -10,8 +10,8 @@ import cv2
 import numpy as np
 
 from .detect import DetectParams, detect_circles, refine_in_roi
-from .grid import GridModel, GridTracker
-from .hull import hull_of_disks
+from .grid import GridModel, GridTracker, ring_order
+from .hull import hull_of_disks, tangent_ring
 from .render import Style, draw_overlay
 from .smooth import OneEuro
 
@@ -41,6 +41,7 @@ class Config:
     smooth: bool = True
     min_cutoff: float = 0.9
     beta: float = 0.015
+    outline: str = "ring"  # "ring" touches every outer disc, "hull" is the convex hull
     margin_frac: float = 0.0  # pad the outline outwards by this fraction of a radius
     fourcc: str = "avc1"
     debug: bool = False
@@ -56,6 +57,8 @@ class Stats:
     coasted: int = 0
     observed_total: int = 0
     present_total: int = 0
+    ring_frames: int = 0
+    max_standoff: float = 0.0
     seconds: float = 0.0
     occupancy: np.ndarray | None = None
 
@@ -156,6 +159,10 @@ def run(cfg: Config) -> Stats:
                 for row in grid:
                     print("    " + " ".join("#" if v else "." for v in row))
 
+    outline_cells = (
+        ring_order(cfg.rows, cfg.cols) if cfg.outline == "ring" and not cfg.no_grid else []
+    )
+
     tracker = _tracker(cfg)
     if occupied is not None:
         tracker.forced_occupied = occupied
@@ -186,7 +193,8 @@ def run(cfg: Config) -> Stats:
 
             centres = np.zeros((0, 2))
             radii = np.zeros(0)
-            observed: np.ndarray | None = None
+            observed = None
+            present_cells = None
 
             if cfg.no_grid:
                 centres, radii = det.circles[:, :2], det.circles[:, 2]
@@ -209,6 +217,7 @@ def run(cfg: Config) -> Stats:
                         nodes = pos_filter(nodes)
                         node_r = rad_filter(node_r)
                     present = model.present
+                    present_cells = np.flatnonzero(present)
                     centres, radii, observed = (
                         nodes[present],
                         node_r[present],
@@ -226,13 +235,24 @@ def run(cfg: Config) -> Stats:
                     if cfg.adaptive:
                         _adapt(params, model, node_r)
 
+            ring: list[int] = []
+            if outline_cells and present_cells is not None:
+                pos = {int(cell): i for i, cell in enumerate(present_cells)}
+                ring = [pos[cell] for cell in outline_cells if cell in pos]
+
             canvas = cv2.resize(
                 frame, out_size, interpolation=cv2.INTER_AREA if out_w < src_w else cv2.INTER_CUBIC
             )
             hull = None
             oc, orr = centres * to_out, radii * to_out
             if len(oc):
-                hull = hull_of_disks(oc, orr, margin=cfg.margin_frac * float(np.median(orr)))
+                margin = cfg.margin_frac * float(np.median(orr))
+                if len(ring) >= 3:
+                    hull = tangent_ring(oc, orr, ring, margin=margin)
+                    stats.ring_frames += 1
+                    stats.max_standoff = max(stats.max_standoff, hull.max_standoff())
+                else:
+                    hull = hull_of_disks(oc, orr, margin=margin)
 
             draw_overlay(
                 canvas,

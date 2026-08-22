@@ -138,6 +138,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="pad the outline outwards by this fraction of a disc radius",
     )
     g.add_argument(
+        "--outline",
+        choices=("ring", "hull"),
+        default="ring",
+        help="ring runs tangent to every disc on the outer ring, following the "
+        "lattice; hull is the convex hull, which only touches the discs that "
+        "reach it",
+    )
+    g.add_argument(
         "--corners",
         choices=("sharp", "round"),
         default="sharp",
@@ -208,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         smooth=not args.no_smooth,
         min_cutoff=args.min_cutoff,
         beta=args.beta,
+        outline=args.outline,
         margin_frac=args.margin_frac,
         fourcc=args.fourcc,
         debug=args.debug,
@@ -230,6 +239,12 @@ def main(argv: list[str] | None = None) -> int:
             f"coasted {stats.coasted}, mean {mean_obs:.1f}/{mean_present:.0f} "
             f"discs detected per frame"
         )
+        if stats.ring_frames:
+            print(
+                f"outline ran tangent to every ring disc on {stats.ring_frames} frames; "
+                f"worst stand-off {stats.max_standoff:.2f} px "
+                f"(only where a disc sits recessed between its neighbours)"
+            )
         print(f"wrote {cfg.dst}")
     return 0
 

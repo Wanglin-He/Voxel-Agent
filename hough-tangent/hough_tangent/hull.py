@@ -33,8 +33,12 @@ class Arc:
     theta0: float
     theta1: float  # always > theta0
 
+    @property
+    def sweep(self) -> float:
+        return self.theta1 - self.theta0
+
     def sample(self, step_px: float = 1.0) -> np.ndarray:
-        span = self.theta1 - self.theta0
+        span = abs(self.sweep)
         n = max(2, int(np.ceil(self.radius * span / max(step_px, 1e-3))) + 1)
         t = np.linspace(self.theta0, self.theta1, n)
         cx, cy = self.center
@@ -95,6 +99,19 @@ class DiskHull:
             return None
         return v
 
+    def max_standoff(self) -> float:
+        """Largest distance by which the outline misses a disk it walks over.
+
+        Zero everywhere the outline turns outward.  At a recessed disk the two
+        tangents cross ``r / cos(turn / 2)`` from its centre, so the outline
+        clears it by ``r * (sec(turn / 2) - 1)`` -- selftest pins this to 1e-11.
+        """
+        worst = 0.0
+        for arc in self.arcs:
+            if arc.sweep < 0.0:
+                worst = max(worst, arc.radius * (1.0 / np.cos(abs(arc.sweep) / 2.0) - 1.0))
+        return worst
+
     def polyline(
         self, step_px: float = 1.0, *, sharp: bool = False, max_reach: float = 6.0
     ) -> np.ndarray:
@@ -107,7 +124,8 @@ class DiskHull:
         """
         parts: list[np.ndarray] = []
         for k, arc in enumerate(self.arcs):
-            corner = self.corner(k, max_reach) if sharp else None
+            want_corner = sharp or arc.sweep < 0.0
+            corner = self.corner(k, max_reach) if want_corner else None
             if corner is not None:
                 parts.append(corner.reshape(1, 2))
             else:
@@ -204,6 +222,85 @@ def hull_of_disks(
                 disk_a=disk,
                 disk_b=nxt,
                 theta=_wrap(th1),
+                p_a=tuple(c[disk] + r[disk] * nv),
+                p_b=tuple(c[nxt] + r[nxt] * nv),
+            )
+        )
+    return DiskHull(arcs, tangents)
+
+
+def _wrap_signed(t: float) -> float:
+    """Shortest signed turn, in (-pi, pi]."""
+    return float(np.mod(t + np.pi, TWO_PI) - np.pi)
+
+
+def _outward_tangent(
+    ca: np.ndarray, ra: float, cb: np.ndarray, rb: float, interior: np.ndarray
+) -> float | None:
+    """Normal angle of the common tangent that leaves both disks on the inside."""
+    d = ca - cb
+    dist = float(np.hypot(d[0], d[1]))
+    if dist < 1e-9:
+        return None
+    k = (rb - ra) / dist
+    if abs(k) > 1.0:  # one disk swallows the other, no outer tangent exists
+        return None
+    psi = float(np.arctan2(d[1], d[0]))
+    a = float(np.arccos(np.clip(k, -1.0, 1.0)))
+    mid = 0.5 * (ca + cb) - interior
+    best_t, best_score = None, -np.inf
+    for t in (psi + a, psi - a):
+        score = float(np.cos(t) * mid[0] + np.sin(t) * mid[1])
+        if score > best_score:
+            best_t, best_score = t, score
+    return _wrap(best_t)
+
+
+def tangent_ring(
+    centers: np.ndarray, radii: np.ndarray, order: list[int], *, margin: float = 0.0
+) -> DiskHull:
+    """Outline that runs tangent to every disk in ``order``, in that cyclic order.
+
+    The convex hull only touches the disks that reach it -- a disk sitting a
+    little inside a hull edge is enclosed but never touched.  When the caller
+    knows which disks form the outer ring (here the lattice tells us), walking
+    that ring instead guarantees each one is touched.  The price is that the
+    outline is no longer convex: at a recessed disk the turn goes the other way,
+    and the boundary there is the crossing of its two tangents.
+    """
+    c = np.asarray(centers, dtype=float).reshape(-1, 2)
+    r = np.asarray(radii, dtype=float).reshape(-1) + float(margin)
+    m = len(order)
+    if m == 0:
+        return DiskHull([], [])
+    if m == 1:
+        i = order[0]
+        return DiskHull([Arc(i, tuple(c[i]), float(r[i]), 0.0, TWO_PI)], [])
+
+    interior = c[order].mean(axis=0)
+    thetas: list[float] = []
+    for k in range(m):
+        a, b = order[k], order[(k + 1) % m]
+        t = _outward_tangent(c[a], r[a], c[b], r[b], interior)
+        if t is None:  # degenerate ring, the convex hull is still well defined
+            return hull_of_disks(c, r)
+        thetas.append(t)
+
+    arcs: list[Arc] = []
+    tangents: list[Tangent] = []
+    for k in range(m):
+        disk = order[k]
+        nxt = order[(k + 1) % m]
+        th_in, th_out = thetas[k - 1], thetas[k]
+        arcs.append(
+            Arc(disk, tuple(c[disk]), float(r[disk]), th_in, th_in + _wrap_signed(th_out - th_in))
+        )
+        nv = np.array([np.cos(th_out), np.sin(th_out)])
+        tangents.append(
+            Tangent(
+                disk_a=disk,
+                disk_b=nxt,
+                theta=th_out,
                 p_a=tuple(c[disk] + r[disk] * nv),
                 p_b=tuple(c[nxt] + r[nxt] * nv),
             )
