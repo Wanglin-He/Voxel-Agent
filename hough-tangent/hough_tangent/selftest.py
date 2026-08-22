@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from .grid import GridTracker, boundary_order, initialise
-from .hull import hull_of_disks, tangent_ring
+from .hull import Arc, DiskHull, Tangent, hull_of_disks, tangent_ring
 
 TWO_PI = 2.0 * np.pi
 _failures: list[str] = []
@@ -280,10 +280,25 @@ def test_arm_tips_square_off() -> None:
 
     split = raw.split_long_arcs(np.pi / 2)
     check(
-        "no arc is left longer than the limit",
-        all(abs(a.sweep) <= np.pi / 2 + 1e-9 for a in split.arcs),
+        "a half-turn tip becomes two right angles",
+        len(split.arcs) == len(raw.arcs) + 2
+        and all(abs(abs(a.sweep) - np.pi / 2) < 1e-9 for a in split.arcs if abs(a.sweep) > 1e-6),
         f"{len(raw.arcs)} arcs -> {len(split.arcs)}",
     )
+
+    # Real footage measures an arm tip at a shade over half a turn, never
+    # exactly.  Rounding that up would give three shallow corners instead of
+    # two right angles, which is what a square end has to be.
+    for deg in (179.8, 180.0, 180.8, 182.2):
+        one = DiskHull(
+            [Arc(0, (0.0, 0.0), 52.0, 0.0, np.deg2rad(deg))],
+            [Tangent(0, 0, 0.0, (52.0, 0.0), (52.0, 0.0))],
+        ).split_long_arcs(np.pi / 2)
+        check(
+            f"{deg} deg tip splits in two",
+            len(one.arcs) == 2,
+            f"{len(one.arcs)} pieces of {np.degrees(abs(one.arcs[0].sweep)):.1f} deg",
+        )
     # A disc sitting flat on a straight edge has the same tangent line either
     # side of it, so it has no crossing and needs none: it contributes its
     # touch point and nothing more.

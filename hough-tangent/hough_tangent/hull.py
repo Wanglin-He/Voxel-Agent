@@ -99,8 +99,8 @@ class DiskHull:
             return None
         return v
 
-    def split_long_arcs(self, max_sweep: float) -> DiskHull:
-        """Cut arcs longer than ``max_sweep`` with an extra tangent line.
+    def split_long_arcs(self, target_sweep: float, max_reach: float = 6.0) -> DiskHull:
+        """Cut long arcs with extra tangent lines so their ends corner.
 
         A one-disk-wide arm ends in a half turn, and two tangent lines half a
         turn apart are parallel -- there is no crossing to build a corner from,
@@ -108,13 +108,22 @@ class DiskHull:
         line at the pole leaves two quarter turns, each with a real crossing,
         and the tip squares off like the rest of the outline.  Every line
         involved still touches the disk, so tangency is untouched.
+
+        ``target_sweep`` is what each piece aims for, not a ceiling: an arm
+        tip measures a shade over half a turn on real footage, and rounding
+        that up gives three shallow corners instead of two right angles.
         """
-        if max_sweep <= 0 or not self.arcs or len(self.tangents) != len(self.arcs):
+        if target_sweep <= 0 or not self.arcs or len(self.tangents) != len(self.arcs):
             return self
+        # Past this the two tangents sit too near parallel for their crossing
+        # to land anywhere useful, so a piece that wide has to be cut smaller.
+        hard_limit = 2.0 * float(np.arccos(1.0 / max(max_reach, 1.0 + 1e-9)))
         arcs: list[Arc] = []
         tangents: list[Tangent] = []
         for k, arc in enumerate(self.arcs):
-            n = max(1, int(np.ceil(abs(arc.sweep) / max_sweep - 1e-9)))
+            n = max(1, int(np.floor(abs(arc.sweep) / target_sweep + 0.5)))
+            while abs(arc.sweep) / n > hard_limit:
+                n += 1
             step = arc.sweep / n
             for j in range(n):
                 t0 = arc.theta0 + j * step
