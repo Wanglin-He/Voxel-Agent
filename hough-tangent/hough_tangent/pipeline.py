@@ -21,7 +21,7 @@ import cv2
 import numpy as np
 
 from .detect import DetectParams, detect_circles, refine_in_roi
-from .grid import GridModel, GridTracker, ring_order
+from .grid import GridModel, GridTracker, boundary_order
 from .hull import hull_of_disks, tangent_ring
 from .render import Style, draw_overlay
 from .smooth import OneEuro
@@ -52,7 +52,7 @@ class Config:
     smooth: bool = True
     min_cutoff: float = 0.9
     beta: float = 0.015
-    outline: str = "ring"  # "ring" touches every outer disc, "hull" is the convex hull
+    outline: str = "ring"  # "ring" follows the occupied boundary, "hull" is the convex hull
     margin_frac: float = 0.0  # pad the outline outwards by this fraction of a radius
     fourcc: str = "avc1"
     debug: bool = False
@@ -252,7 +252,9 @@ def run(cfg: Config) -> Stats:
                 print("    " + " ".join("#" if v else "." for v in row))
 
     outline_cells = (
-        ring_order(cfg.rows, cfg.cols) if cfg.outline == "ring" and not cfg.no_grid else []
+        boundary_order(occupied, cfg.rows, cfg.cols)
+        if cfg.outline == "ring" and not cfg.no_grid and occupied is not None
+        else []
     )
     pos = (
         {int(c): i for i, c in enumerate(np.flatnonzero(occupied))} if occupied is not None else {}

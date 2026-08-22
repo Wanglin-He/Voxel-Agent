@@ -88,7 +88,7 @@ cd ~/Projects/Voxel-Agent/hough-tangent
 
 | 参数 | 默认 | 作用 |
 |---|---|---|
-| `--outline ring\|hull` | `ring` | `ring` 沿最外圈逐个外切，每个外圈圆都被切到；`hull` 是凸包，只切到够得着边的那几个 |
+| `--outline ring\|hull` | `ring` | `ring` 沿实际占用区域的边界逐个外切，缺口会凹进去；`hull` 是凸包，只切到够得着边的那几个 |
 | `--corners sharp\|round` | `sharp` | 拐角走切线交点（尖角）还是沿圆弧 |
 | `--margin-frac F` | `0` | 框往外扩，单位是盘半径的倍数。盘倾斜时想把圆柱侧壁也圈进去就调这个，`0.1` 左右 |
 | `--tangent-extend PX` | `0` | 把切线延长出切点若干像素，视觉上强调"这是切线" |

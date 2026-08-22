@@ -234,10 +234,14 @@ def _wrap_signed(t: float) -> float:
     return float(np.mod(t + np.pi, TWO_PI) - np.pi)
 
 
-def _outward_tangent(
-    ca: np.ndarray, ra: float, cb: np.ndarray, rb: float, interior: np.ndarray
-) -> float | None:
-    """Normal angle of the common tangent that leaves both disks on the inside."""
+def _outward_tangent(ca: np.ndarray, ra: float, cb: np.ndarray, rb: float) -> float | None:
+    """Normal angle of the common tangent on the outward side of the walk.
+
+    Which side is "outward" is decided by the direction of travel, not by which
+    way the centre of the shape lies.  Inside a notch those disagree: the
+    material is behind you there, so a centre-based test picks the tangent that
+    cuts straight across the gap.
+    """
     d = ca - cb
     dist = float(np.hypot(d[0], d[1]))
     if dist < 1e-9:
@@ -247,12 +251,13 @@ def _outward_tangent(
         return None
     psi = float(np.arctan2(d[1], d[0]))
     a = float(np.arccos(np.clip(k, -1.0, 1.0)))
-    mid = 0.5 * (ca + cb) - interior
-    best_t, best_score = None, -np.inf
+    travel = cb - ca
+    best_t, best_cross = None, np.inf
     for t in (psi + a, psi - a):
-        score = float(np.cos(t) * mid[0] + np.sin(t) * mid[1])
-        if score > best_score:
-            best_t, best_score = t, score
+        nx, ny = np.cos(t), np.sin(t)
+        cross = float(travel[0] * ny - travel[1] * nx)  # negative on the outward side
+        if cross < best_cross:
+            best_t, best_cross = t, cross
     return _wrap(best_t)
 
 
@@ -277,11 +282,10 @@ def tangent_ring(
         i = order[0]
         return DiskHull([Arc(i, tuple(c[i]), float(r[i]), 0.0, TWO_PI)], [])
 
-    interior = c[order].mean(axis=0)
     thetas: list[float] = []
     for k in range(m):
         a, b = order[k], order[(k + 1) % m]
-        t = _outward_tangent(c[a], r[a], c[b], r[b], interior)
+        t = _outward_tangent(c[a], r[a], c[b], r[b])
         if t is None:  # degenerate ring, the convex hull is still well defined
             return hull_of_disks(c, r)
         thetas.append(t)
@@ -291,10 +295,22 @@ def tangent_ring(
     for k in range(m):
         disk = order[k]
         nxt = order[(k + 1) % m]
+        prv = order[k - 1]
         th_in, th_out = thetas[k - 1], thetas[k]
-        arcs.append(
-            Arc(disk, tuple(c[disk]), float(r[disk]), th_in, th_in + _wrap_signed(th_out - th_in))
+        # How far the normal swings across a disk is close to how far the walk
+        # itself turns there, so let the walk pick the branch.  Taking the
+        # shortest turn instead gets the tip of a one-disk-wide arm exactly
+        # backwards: the turn there is half a revolution, and the short way
+        # round cuts across the disk instead of wrapping it.
+        d_in = c[disk] - c[prv]
+        d_out = c[nxt] - c[disk]
+        phi = _wrap_signed(
+            float(np.arctan2(d_out[1], d_out[0])) - float(np.arctan2(d_in[1], d_in[0]))
         )
+        if abs(abs(phi) - np.pi) < 1e-6:
+            phi = np.pi  # doubling back round a tip always wraps outwards
+        sweep = phi + _wrap_signed(th_out - th_in - phi)
+        arcs.append(Arc(disk, tuple(c[disk]), float(r[disk]), th_in, th_in + sweep))
         nv = np.array([np.cos(th_out), np.sin(th_out)])
         tangents.append(
             Tangent(

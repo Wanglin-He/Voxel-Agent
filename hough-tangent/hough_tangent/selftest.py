@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .grid import GridTracker, initialise, ring_order
+from .grid import GridTracker, boundary_order, initialise
 from .hull import hull_of_disks, tangent_ring
 
 TWO_PI = 2.0 * np.pi
@@ -130,7 +130,7 @@ def test_tangent_ring_touches_everything() -> None:
     worst_bound = 0.0
     for _ in range(120):
         rows, cols = 4, 4
-        order = ring_order(rows, cols)
+        order = boundary_order(np.ones(rows * cols, bool), rows, cols)
         c, r = [], []
         for k in range(rows * cols):
             v, u = divmod(k, cols)
@@ -185,6 +185,74 @@ def test_ring_turn_directions() -> None:
     check(
         "only the recessed disk turns the other way", sum(1 for a in ring.arcs if a.sweep < 0) == 1
     )
+
+
+def test_boundary_follows_the_holes() -> None:
+    """A lattice with cells missing is not a rectangle; the walk must say so."""
+
+    def walk(spec: str) -> list[int]:
+        mask = np.array([[ch != "0" for ch in row] for row in spec.split(",")], bool).reshape(-1)
+        return boundary_order(mask, 4, 4)
+
+    full = walk("1111,1111,1111,1111")
+    check("a full lattice walks its 12 edge cells", len(full) == 12 and len(set(full)) == 12)
+
+    notch = walk("1111,1111,1111,1011")
+    check("one missing cell is stepped around", 13 not in notch, f"walk {notch}")
+
+    arch = walk("1111,1111,1001,1001")
+    empty = {9, 10, 13, 14}
+    check("a 2x2 bite is stepped around", not (empty & set(arch)), f"walk {arch}")
+    check(
+        "a one-cell-wide leg is walked down both sides",
+        arch.count(12) == 1 and arch.count(8) == 2,
+        f"walk {arch}",
+    )
+
+    holes = walk("1111,1011,1101,1111")
+    check("interior holes stay enclosed", len(holes) == 12 and 5 not in holes and 10 not in holes)
+
+
+def test_notched_outline_excludes_the_gaps() -> None:
+    """Every empty cell must end up outside, and no disk may be cut into."""
+    pitch, radius = 140.0, 52.0
+    for spec in (
+        "1111,1111,1111,1011",
+        "1111,1111,1111,1001",
+        "1111,1111,1011,1001",
+        "1111,1111,1001,1001",
+    ):
+        mask = np.array([[ch != "0" for ch in row] for row in spec.split(",")], bool).reshape(-1)
+        cells = np.flatnonzero(mask)
+        c = np.array([[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in cells], float)
+        r = np.full(len(c), radius)
+        pos = {int(k): i for i, k in enumerate(cells)}
+        order = [pos[k] for k in boundary_order(mask, 4, 4) if k in pos]
+        ring = tangent_ring(c, r, order)
+        poly = ring.polyline(0.5, sharp=True)
+        turn = sum(a.sweep for a in ring.arcs)
+        check(
+            f"{spec}: closes with one full turn",
+            abs(turn - 2 * np.pi) < 1e-6,
+            f"{np.degrees(turn):.1f} deg",
+        )
+        cut = min(_dist_to_polyline(poly, c[k]) - r[k] for k in range(len(c)))
+        # Arcs are measured as chords, which sag step^2 / (8r) below the true
+        # curve; anything deeper than that would be the outline actually biting in.
+        sag = 0.5**2 / (8.0 * radius)
+        check(
+            f"{spec}: cuts into no disc",
+            cut > -(sag + 1e-9),
+            f"deepest {cut:.2e} px, chord sag {sag:.2e} px",
+        )
+        holes = [[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in np.flatnonzero(~mask)]
+        import cv2
+
+        inside = [
+            cv2.pointPolygonTest(poly.astype(np.float32), (float(x), float(y)), False) >= 0
+            for x, y in holes
+        ]
+        check(f"{spec}: leaves all {len(holes)} empty cells outside", not any(inside))
 
 
 def test_hull_shapes() -> None:
@@ -273,6 +341,8 @@ def main() -> int:
         test_tangent_ring_touches_everything,
         test_ring_beats_hull_on_a_recessed_disk,
         test_ring_turn_directions,
+        test_boundary_follows_the_holes,
+        test_notched_outline_excludes_the_gaps,
         test_hull_shapes,
         test_grid_initialise,
         test_tracker_learns_vacancies,

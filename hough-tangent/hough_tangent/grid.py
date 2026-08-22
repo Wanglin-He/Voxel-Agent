@@ -44,19 +44,58 @@ class GridModel:
         return divmod(k, self.cols)  # (v, u)
 
 
-def ring_order(rows: int, cols: int) -> list[int]:
-    """Perimeter cell ids in cyclic order: top row, right column, bottom, left."""
-    if rows < 1 or cols < 1:
+def boundary_order(occupied: np.ndarray, rows: int, cols: int) -> list[int]:
+    """Cell ids around the edge of the occupied region, in traversal order.
+
+    A 4x4 lattice with cells missing is not a rectangle, and framing it as one
+    puts bare frame inside the outline.  Tracing the occupancy mask instead
+    makes the boundary dip into every notch.  Where the region narrows to a
+    single cell the walk passes along both of its sides, so that cell appears
+    twice -- which is right: the outline has to come down one side of a lone
+    disc and back up the other.
+
+    Interior holes stay enclosed.  A simple closed curve cannot exclude a void
+    it surrounds, so those are left alone.
+    """
+    mask = np.asarray(occupied, dtype=bool).reshape(rows, cols)
+    if not mask.any():
         return []
-    if rows == 1:
-        return list(range(cols))
-    if cols == 1:
-        return [v * cols for v in range(rows)]
-    top = [u for u in range(cols)]
-    right = [v * cols + (cols - 1) for v in range(1, rows)]
-    bottom = [(rows - 1) * cols + u for u in range(cols - 2, -1, -1)]
-    left = [v * cols for v in range(rows - 2, 0, -1)]
-    return top + right + bottom + left
+    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not contours:
+        return []
+    pts = max(contours, key=len).reshape(-1, 2)  # (col, row)
+    uv = [(int(x), int(y)) for x, y in pts]
+    if len(uv) < 3:
+        return [y * cols + x for x, y in uv]
+    # findContours walks an outer boundary the opposite way round from what the
+    # tangent walk expects.  Reverse unconditionally: a shoelace test would be
+    # fooled by the zero-area spurs a one-cell-wide arm leaves in the polygon.
+    uv.reverse()
+    uv = _square_off(uv, mask)
+    return [v * cols + u for u, v in uv]
+
+
+def _square_off(uv: list[tuple[int, int]], mask: np.ndarray) -> list[tuple[int, int]]:
+    """Turn diagonal steps into staircases along occupied cells.
+
+    Contour tracing is happy to cut a corner diagonally, which leaves the
+    outline slack against the disc in that corner.  Stepping through the corner
+    cell instead keeps the boundary tight to whatever is actually there.
+    """
+    rows, cols = mask.shape
+    out: list[tuple[int, int]] = []
+    n = len(uv)
+    for i in range(n):
+        u0, v0 = uv[i]
+        out.append((u0, v0))
+        u1, v1 = uv[(i + 1) % n]
+        if abs(u1 - u0) != 1 or abs(v1 - v0) != 1:
+            continue
+        for u, v in ((u1, v0), (u0, v1)):
+            if 0 <= v < rows and 0 <= u < cols and mask[v, u]:
+                out.append((u, v))
+                break
+    return out
 
 
 def _median_nn(pts: np.ndarray) -> float:
