@@ -99,6 +99,34 @@ class DiskHull:
             return None
         return v
 
+    def split_long_arcs(self, max_sweep: float) -> DiskHull:
+        """Cut arcs longer than ``max_sweep`` with an extra tangent line.
+
+        A one-disk-wide arm ends in a half turn, and two tangent lines half a
+        turn apart are parallel -- there is no crossing to build a corner from,
+        so the tip can only come out round.  Cutting that arc with a tangent
+        line at the pole leaves two quarter turns, each with a real crossing,
+        and the tip squares off like the rest of the outline.  Every line
+        involved still touches the disk, so tangency is untouched.
+        """
+        if max_sweep <= 0 or not self.arcs or len(self.tangents) != len(self.arcs):
+            return self
+        arcs: list[Arc] = []
+        tangents: list[Tangent] = []
+        for k, arc in enumerate(self.arcs):
+            n = max(1, int(np.ceil(abs(arc.sweep) / max_sweep - 1e-9)))
+            step = arc.sweep / n
+            for j in range(n):
+                t0 = arc.theta0 + j * step
+                arcs.append(Arc(arc.disk, arc.center, arc.radius, t0, t0 + step))
+                if j < n - 1:
+                    t1 = t0 + step
+                    nv = np.array([np.cos(t1), np.sin(t1)])
+                    touch = tuple(np.asarray(arc.center) + arc.radius * nv)
+                    tangents.append(Tangent(arc.disk, arc.disk, _wrap(t1), touch, touch))
+            tangents.append(self.tangents[k])
+        return DiskHull(arcs, tangents)
+
     def max_standoff(self) -> float:
         """Largest distance by which the outline misses a disk it walks over.
 

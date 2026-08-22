@@ -255,6 +255,70 @@ def test_notched_outline_excludes_the_gaps() -> None:
         check(f"{spec}: leaves all {len(holes)} empty cells outside", not any(inside))
 
 
+def test_arm_tips_square_off() -> None:
+    """A one-disc-wide arm ends in a half turn, which has no corner of its own."""
+    pitch, radius = 140.0, 52.0
+    spec = "1111,1111,1001,1001"
+    mask = np.array([[ch != "0" for ch in row] for row in spec.split(",")], bool).reshape(-1)
+    cells = np.flatnonzero(mask)
+    c = np.array([[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in cells], float)
+    r = np.full(len(c), radius)
+    pos = {int(k): i for i, k in enumerate(cells)}
+    order = [pos[k] for k in boundary_order(mask, 4, 4) if k in pos]
+
+    raw = tangent_ring(c, r, order)
+    tips = [a for a in raw.arcs if abs(a.sweep) > np.deg2rad(90) + 1e-9]
+    check(
+        "an arm tip really is a half turn",
+        len(tips) == 2 and all(abs(abs(a.sweep) - np.pi) < 1e-9 for a in tips),
+        f"{[round(np.degrees(a.sweep), 1) for a in tips]} deg",
+    )
+    check(
+        "and so has no tangent crossing to corner at",
+        all(raw.corner(k) is None for k, a in enumerate(raw.arcs) if abs(a.sweep) > 3.0),
+    )
+
+    split = raw.split_long_arcs(np.pi / 2)
+    check(
+        "no arc is left longer than the limit",
+        all(abs(a.sweep) <= np.pi / 2 + 1e-9 for a in split.arcs),
+        f"{len(raw.arcs)} arcs -> {len(split.arcs)}",
+    )
+    # A disc sitting flat on a straight edge has the same tangent line either
+    # side of it, so it has no crossing and needs none: it contributes its
+    # touch point and nothing more.
+    turning = [k for k, a in enumerate(split.arcs) if abs(a.sweep) > 1e-6]
+    check(
+        "every arc that turns now has a corner",
+        all(split.corner(k) is not None for k in turning),
+        f"{len(turning)} turning arcs",
+    )
+
+    poly = split.polyline(0.5, sharp=True)
+    check(
+        "the outline is then all corners, no arc",
+        len(poly) == len(split.arcs),
+        f"{len(poly)} vertices for {len(split.arcs)} arcs",
+    )
+
+    # Splitting must not cost tangency, nor let the outline bite into a disc.
+    sag = 0.5**2 / (8.0 * radius)
+    gaps = [_dist_to_polyline(poly, c[k]) - r[k] for k in sorted(set(order))]
+    check("every boundary disc is still touched", max(gaps) < 1e-6, f"largest {max(gaps):.2e} px")
+    check("and none is cut into", min(gaps) > -(sag + 1e-9), f"deepest {min(gaps):.2e} px")
+
+    # A right-angle corner is already as long as we allow, so it is left alone.
+    full = np.ones(16, bool)
+    cf = np.array([[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in range(16)], float)
+    posf = {k: k for k in range(16)}
+    of = [posf[k] for k in boundary_order(full, 4, 4)]
+    ring = tangent_ring(cf, np.full(16, radius), of)
+    check(
+        "a square lattice is left alone",
+        len(ring.split_long_arcs(np.pi / 2).arcs) == len(ring.arcs),
+    )
+
+
 def test_hull_shapes() -> None:
     square = hull_of_disks(
         np.array([[0.0, 0.0], [100.0, 0.0], [0.0, 100.0], [100.0, 100.0]]), np.full(4, 20.0)
@@ -343,6 +407,7 @@ def main() -> int:
         test_ring_turn_directions,
         test_boundary_follows_the_holes,
         test_notched_outline_excludes_the_gaps,
+        test_arm_tips_square_off,
         test_hull_shapes,
         test_grid_initialise,
         test_tracker_learns_vacancies,

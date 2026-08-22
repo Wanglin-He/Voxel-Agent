@@ -41,6 +41,7 @@ class Style:
     show_circles: bool = True
     show_tangent_points: bool = True
     sharp_corners: bool = True  # meet the tangents at a point instead of rounding
+    max_arc_deg: float = 90.0  # split longer arcs so their ends corner instead of rounding
     max_corner_reach: float = 6.0
 
 
@@ -76,6 +77,8 @@ def draw_overlay(
                 _SHIFT,
             )
 
+    if hull is not None and style.sharp_corners and style.max_arc_deg > 0:
+        hull = hull.split_long_arcs(np.deg2rad(style.max_arc_deg))
     poly = (
         hull.polyline(1.0, sharp=style.sharp_corners, max_reach=style.max_corner_reach)
         if hull is not None
