@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .grid import GridTracker, boundary_order, initialise
+from .grid import GridTracker, boundary_order, hole_orders, initialise
 from .hull import Arc, DiskHull, Tangent, hull_of_disks, tangent_ring
 
 TWO_PI = 2.0 * np.pi
@@ -255,6 +255,86 @@ def test_notched_outline_excludes_the_gaps() -> None:
         check(f"{spec}: leaves all {len(holes)} empty cells outside", not any(inside))
 
 
+def test_holes_get_their_own_outline() -> None:
+    """Empty cells the board surrounds get an inner outline, tangent from inside.
+
+    The outer walk cannot exclude them, so each hole is walked on its own.  The
+    same stand-off bound applies as on the outside: where the walk turns away
+    from a disc, its two tangents cross ``r * (sec(turn / 2) - 1)`` off it.
+    """
+    import cv2
+
+    pitch, radius = 140.0, 52.0
+    check("a full board has no holes", hole_orders(np.ones(16, bool), 4, 4) == [])
+    bite = np.array([ch != "0" for ch in "1111111110011001"], bool)
+    check("a bite open to the outside is not a hole", hole_orders(bite, 4, 4) == [])
+
+    for spec, n_holes in (
+        ("1111,1001,1001,1111", 1),
+        ("1111,1011,1101,1111", 2),
+        ("1111,1001,1011,1111", 1),
+    ):
+        mask = np.array([[ch != "0" for ch in row] for row in spec.split(",")], bool).reshape(-1)
+        cells = np.flatnonzero(mask)
+        c = np.array([[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in cells], float)
+        r = np.full(len(c), radius)
+        pos = {int(k): i for i, k in enumerate(cells)}
+        walks = hole_orders(mask, 4, 4)
+        check(f"{spec}: finds {n_holes} hole(s)", len(walks) == n_holes, f"found {len(walks)}")
+
+        polys, worst_turn, worst_excess, worst_cut = [], 0.0, -np.inf, np.inf
+        for walk in walks:
+            order = [pos[k] for k in walk]
+            ring = tangent_ring(c, r, order, fallback=False)
+            poly = ring.polyline(0.25, sharp=True)
+            polys.append(poly.astype(np.float32))
+            worst_turn = max(worst_turn, abs(sum(a.sweep for a in ring.arcs) + 2 * np.pi))
+            for i, k in enumerate(order):
+                gap = _dist_to_polyline(poly, c[k]) - r[k]
+                sweep = ring.arcs[i].sweep
+                bound = r[k] * (1.0 / np.cos(abs(sweep) / 2.0) - 1.0) if sweep < 0.0 else 0.0
+                worst_excess = max(worst_excess, gap - bound)
+                worst_cut = min(worst_cut, gap)
+        check(
+            f"{spec}: each hole closes with one full turn the other way",
+            worst_turn < 1e-6,
+            f"off by {np.degrees(worst_turn):.2e} deg",
+        )
+        check(
+            f"{spec}: touches its discs, recessed ones within r*(sec(turn/2)-1)",
+            worst_excess < 1e-6,
+            f"worst overshoot {worst_excess:.2e} px",
+        )
+        check(f"{spec}: cuts into no disc", worst_cut > -1e-6, f"deepest {worst_cut:.2e} px")
+
+        def holes_round(x: float, y: float) -> int:
+            return sum(cv2.pointPolygonTest(p, (float(x), float(y)), False) > 0 for p in polys)
+
+        empty = [(80 + pitch * (k % 4), 80 + pitch * (k // 4)) for k in np.flatnonzero(~mask)]
+        check(
+            f"{spec}: every empty cell sits in exactly one hole",
+            all(holes_round(x, y) == 1 for x, y in empty),
+        )
+        check(f"{spec}: no disc sits in a hole", not any(holes_round(x, y) for x, y in c))
+
+    # The 2x2 pocket in the middle of a 4x4 board comes out a true square: four
+    # right angles, each side tangent to the two discs along it.
+    mask = np.array([ch != "0" for ch in "1111100110011111"], bool)
+    cells = np.flatnonzero(mask)
+    c = np.array([[80 + pitch * (k % 4), 80 + pitch * (k // 4)] for k in cells], float)
+    pos = {int(k): i for i, k in enumerate(cells)}
+    ring = tangent_ring(c, np.full(len(c), radius), [pos[k] for k in hole_orders(mask, 4, 4)[0]])
+    poly = ring.split_long_arcs(np.pi / 2).polyline(1.0, sharp=True)
+    side = 3 * pitch - 2 * radius
+    lo, hi = poly.min(axis=0), poly.max(axis=0)
+    area = abs(float(cv2.contourArea(poly.astype(np.float32))))
+    check(
+        "a 2x2 pocket is outlined by a square",
+        np.allclose(hi - lo, side, atol=1e-6) and abs(area - side * side) < 1e-3,
+        f"{hi[0] - lo[0]:.3f} x {hi[1] - lo[1]:.3f}, area {area:.1f} vs {side * side:.1f}",
+    )
+
+
 def test_arm_tips_square_off() -> None:
     """A one-disc-wide arm ends in a half turn, which has no corner of its own."""
     pitch, radius = 140.0, 52.0
@@ -422,6 +502,7 @@ def main() -> int:
         test_ring_turn_directions,
         test_boundary_follows_the_holes,
         test_notched_outline_excludes_the_gaps,
+        test_holes_get_their_own_outline,
         test_arm_tips_square_off,
         test_hull_shapes,
         test_grid_initialise,

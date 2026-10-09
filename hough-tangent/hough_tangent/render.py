@@ -63,8 +63,13 @@ def draw_overlay(
     px: float = 1.0,
     raw: np.ndarray | None = None,
     hud_lines: list[str] | None = None,
+    holes: list[DiskHull] | None = None,
 ) -> np.ndarray:
-    """Draw onto ``canvas`` in place.  ``px`` scales line weights with resolution."""
+    """Draw onto ``canvas`` in place.  ``px`` scales line weights with resolution.
+
+    ``holes`` are outlines round empty pockets inside ``hull``; they are drawn
+    the same way and left out of the fill.
+    """
     if raw is not None and len(raw):
         for x, y, r in raw:
             cv2.circle(
@@ -77,16 +82,18 @@ def draw_overlay(
                 _SHIFT,
             )
 
-    if hull is not None and style.sharp_corners and style.max_arc_deg > 0:
-        hull = hull.split_long_arcs(np.deg2rad(style.max_arc_deg))
-    poly = (
-        hull.polyline(1.0, sharp=style.sharp_corners, max_reach=style.max_corner_reach)
-        if hull is not None
-        else None
-    )
-    if poly is not None and len(poly) >= 3 and style.fill_alpha > 0:
+    outlines = [h for h in [hull, *(holes or [])] if h is not None]
+    if style.sharp_corners and style.max_arc_deg > 0:
+        outlines = [h.split_long_arcs(np.deg2rad(style.max_arc_deg)) for h in outlines]
+    polys = [
+        h.polyline(1.0, sharp=style.sharp_corners, max_reach=style.max_corner_reach)
+        for h in outlines
+    ]
+    polys = [p for p in polys if len(p) >= 3]
+    if polys and style.fill_alpha > 0:
         overlay = canvas.copy()
-        cv2.fillPoly(overlay, [_poly(poly)], style.hull, cv2.LINE_AA, _SHIFT)
+        # fillPoly fills even-odd, so a hole drawn alongside its outline stays clear.
+        cv2.fillPoly(overlay, [_poly(p) for p in polys], style.hull, cv2.LINE_AA, _SHIFT)
         cv2.addWeighted(overlay, style.fill_alpha, canvas, 1.0 - style.fill_alpha, 0.0, canvas)
 
     if style.show_circles:
@@ -108,47 +115,47 @@ def draw_overlay(
                 canvas, _p((x, y)), round(2.0 * px * _SUB), style.centre, -1, cv2.LINE_AA, _SHIFT
             )
 
-    if hull is not None:
-        if style.tangent_extend > 0:
-            for t in hull.tangents:
-                a, b = np.array(t.p_a, dtype=float), np.array(t.p_b, dtype=float)
-                d = b - a
-                n = float(np.linalg.norm(d))
-                if n < 1e-6:
-                    continue
-                d /= n
-                ext = style.tangent_extend * px
-                cv2.line(
-                    canvas,
-                    _p(a - d * ext),
-                    _p(b + d * ext),
-                    style.tangent_line,
-                    _thick(1.0, px),
-                    cv2.LINE_AA,
-                    _SHIFT,
-                )
-        if poly is not None and len(poly) >= 3:
-            cv2.polylines(
+    tangents = [t for h in outlines for t in h.tangents]
+    if style.tangent_extend > 0:
+        for t in tangents:
+            a, b = np.array(t.p_a, dtype=float), np.array(t.p_b, dtype=float)
+            d = b - a
+            n = float(np.linalg.norm(d))
+            if n < 1e-6:
+                continue
+            d /= n
+            ext = style.tangent_extend * px
+            cv2.line(
                 canvas,
-                [_poly(poly)],
-                True,
-                style.hull,
-                _thick(style.hull_thickness, px),
+                _p(a - d * ext),
+                _p(b + d * ext),
+                style.tangent_line,
+                _thick(1.0, px),
                 cv2.LINE_AA,
                 _SHIFT,
             )
-        if style.show_tangent_points:
-            for t in hull.tangents:
-                for pt in (t.p_a, t.p_b):
-                    cv2.circle(
-                        canvas,
-                        _p(pt),
-                        round(style.tangent_point_radius * px * _SUB),
-                        style.tangent_point,
-                        -1,
-                        cv2.LINE_AA,
-                        _SHIFT,
-                    )
+    if polys:
+        cv2.polylines(
+            canvas,
+            [_poly(p) for p in polys],
+            True,
+            style.hull,
+            _thick(style.hull_thickness, px),
+            cv2.LINE_AA,
+            _SHIFT,
+        )
+    if style.show_tangent_points:
+        for t in tangents:
+            for pt in (t.p_a, t.p_b):
+                cv2.circle(
+                    canvas,
+                    _p(pt),
+                    round(style.tangent_point_radius * px * _SUB),
+                    style.tangent_point,
+                    -1,
+                    cv2.LINE_AA,
+                    _SHIFT,
+                )
 
     if style.show_hud and hud_lines:
         scale = 0.5 * style.hud_scale * px

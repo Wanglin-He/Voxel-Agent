@@ -299,7 +299,12 @@ def _outward_tangent(ca: np.ndarray, ra: float, cb: np.ndarray, rb: float) -> fl
 
 
 def tangent_ring(
-    centers: np.ndarray, radii: np.ndarray, order: list[int], *, margin: float = 0.0
+    centers: np.ndarray,
+    radii: np.ndarray,
+    order: list[int],
+    *,
+    margin: float = 0.0,
+    fallback: bool = True,
 ) -> DiskHull:
     """Outline that runs tangent to every disk in ``order``, in that cyclic order.
 
@@ -309,6 +314,10 @@ def tangent_ring(
     that ring instead guarantees each one is touched.  The price is that the
     outline is no longer convex: at a recessed disk the turn goes the other way,
     and the boundary there is the crossing of its two tangents.
+
+    A ring too degenerate to walk falls back to the convex hull.  That is no
+    stand-in for the walk round a hole, so pass ``fallback=False`` there and get
+    an empty outline instead.
     """
     c = np.asarray(centers, dtype=float).reshape(-1, 2)
     r = np.asarray(radii, dtype=float).reshape(-1) + float(margin)
@@ -324,7 +333,7 @@ def tangent_ring(
         a, b = order[k], order[(k + 1) % m]
         t = _outward_tangent(c[a], r[a], c[b], r[b])
         if t is None:  # degenerate ring, the convex hull is still well defined
-            return hull_of_disks(c, r)
+            return hull_of_disks(c, r) if fallback else DiskHull([], [])
         thetas.append(t)
 
     arcs: list[Arc] = []

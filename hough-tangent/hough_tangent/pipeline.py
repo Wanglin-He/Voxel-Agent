@@ -21,8 +21,8 @@ import cv2
 import numpy as np
 
 from .detect import DetectParams, detect_circles, refine_in_roi
-from .grid import GridModel, GridTracker, boundary_order
-from .hull import hull_of_disks, tangent_ring
+from .grid import GridModel, GridTracker, boundary_order, hole_orders
+from .hull import DiskHull, hull_of_disks, tangent_ring
 from .render import Style, draw_overlay
 from .smooth import OneEuro
 from .validate import disc_reference
@@ -54,6 +54,7 @@ class Config:
     beta: float = 0.015
     outline: str = "ring"  # "ring" follows the occupied boundary, "hull" is the convex hull
     margin_frac: float = 0.0  # pad the outline outwards by this fraction of a radius
+    holes: bool = True  # outline empty cells the board surrounds, not just the outside
     fourcc: str = "avc1"
     debug: bool = False
     quiet: bool = False
@@ -70,6 +71,8 @@ class Stats:
     present_total: int = 0
     ring_frames: int = 0
     max_standoff: float = 0.0
+    holes: int = 0
+    hole_frames: int = 0
     relocks: int = 0
     seconds: float = 0.0
     occupancy: np.ndarray | None = None
@@ -260,6 +263,14 @@ def run(cfg: Config) -> Stats:
         {int(c): i for i, c in enumerate(np.flatnonzero(occupied))} if occupied is not None else {}
     )
     ring = [pos[c] for c in outline_cells if c in pos]
+    # Empty cells the board surrounds get an outline of their own, tangent to
+    # the discs round them from the inside.
+    holes = (
+        [[pos[c] for c in walk if c in pos] for walk in hole_orders(occupied, cfg.rows, cfg.cols)]
+        if cfg.holes and not cfg.no_grid and occupied is not None
+        else []
+    )
+    holes = [h for h in holes if len(h) >= 3]
 
     pos_filter = OneEuro(fps / cfg.stride, cfg.min_cutoff, cfg.beta)
     rad_filter = OneEuro(fps / cfg.stride, cfg.min_cutoff, cfg.beta * 0.5)
@@ -268,7 +279,7 @@ def run(cfg: Config) -> Stats:
     cfg.dst.parent.mkdir(parents=True, exist_ok=True)
     writer = _make_writer(cfg.dst, cfg.fourcc, fps / cfg.stride, out_size)
     cap = _open(cfg.src)
-    stats = Stats(occupancy=occupied)
+    stats = Stats(occupancy=occupied, holes=len(holes))
     stats.relocks = len({s.generation for s in states if s.observed is not None})
     by_index = {s.index: s for s in states}
     try:
@@ -307,6 +318,7 @@ def run(cfg: Config) -> Stats:
                 frame, out_size, interpolation=cv2.INTER_AREA if out_w < src_w else cv2.INTER_CUBIC
             )
             hull = None
+            inner: list[DiskHull] = []
             oc, orr = centres * to_out, radii * to_out
             if len(oc):
                 margin = cfg.margin_frac * float(np.median(orr))
@@ -316,6 +328,9 @@ def run(cfg: Config) -> Stats:
                     stats.max_standoff = max(stats.max_standoff, hull.max_standoff())
                 else:
                     hull = hull_of_disks(oc, orr, margin=margin)
+                if holes and len(oc) == len(pos):
+                    inner = [tangent_ring(oc, orr, h, margin=margin, fallback=False) for h in holes]
+                    stats.hole_frames += 1
 
             draw_overlay(
                 canvas,
@@ -329,6 +344,7 @@ def run(cfg: Config) -> Stats:
                 if (cfg.debug and state is not None and state.raw is not None and len(state.raw))
                 else None,
                 hud_lines=[f"frame {idx}  |  {status}"] if cfg.style.show_hud else None,
+                holes=inner,
             )
             writer.write(canvas)
             stats.frames += 1

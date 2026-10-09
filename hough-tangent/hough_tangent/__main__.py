@@ -157,6 +157,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.0,
         help="draw each tangent line this many px past its two touch points",
     )
+    g.add_argument(
+        "--no-holes",
+        action="store_true",
+        help="leave empty cells the board surrounds inside the outline instead "
+        "of drawing an inner outline round them",
+    )
     g.add_argument("--hull-colour", type=_colour, default=None, metavar="B,G,R")
     g.add_argument("--fill-alpha", type=float, default=0.10)
     g.add_argument("--no-circles", action="store_true", help="outline only")
@@ -210,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         beta=args.beta,
         outline=args.outline,
         margin_frac=args.margin_frac,
+        holes=not args.no_holes,
         fourcc=args.fourcc,
         debug=args.debug,
         quiet=args.quiet,
@@ -236,6 +243,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"outline ran tangent to every ring disc on {stats.ring_frames} frames; "
                 f"worst stand-off {stats.max_standoff:.2f} px "
                 f"(only where a disc sits recessed between its neighbours)"
+            )
+        if stats.hole_frames:
+            print(
+                f"inner outline round {stats.holes} enclosed empty region(s) "
+                f"on {stats.hole_frames} frames"
             )
         print(f"wrote {cfg.dst}")
     return 0

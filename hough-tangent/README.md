@@ -92,6 +92,7 @@ cd ~/Projects/Voxel-Agent/hough-tangent
 | `--corners sharp\|round` | `sharp` | 拐角走切线交点（尖角）还是沿圆弧 |
 | `--margin-frac F` | `0` | 框往外扩，单位是盘半径的倍数。盘倾斜时想把圆柱侧壁也圈进去就调这个，`0.1` 左右 |
 | `--tangent-extend PX` | `0` | 把切线延长出切点若干像素，视觉上强调"这是切线" |
+| `--no-holes` | 关 | 板子中间被围住的空格位默认会单独画一圈内轮廓；加这个就不画，空格留在外框里 |
 | `--no-circles` | 关 | 只画框，不画每个圆 |
 | `--no-hud` | 关 | 去掉左上角的帧号和检出计数 |
 | `--hull-colour B,G,R` | 青色 | 框的颜色，注意是 BGR 不是 RGB |

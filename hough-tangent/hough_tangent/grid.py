@@ -55,21 +55,54 @@ def boundary_order(occupied: np.ndarray, rows: int, cols: int) -> list[int]:
     disc and back up the other.
 
     Interior holes stay enclosed.  A simple closed curve cannot exclude a void
-    it surrounds, so those are left alone.
+    it surrounds, so each of those gets a walk of its own from ``hole_orders``.
     """
     mask = np.asarray(occupied, dtype=bool).reshape(rows, cols)
     if not mask.any():
         return []
-    contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    if not contours:
+    outer, _ = _trace(mask)
+    return [] if outer is None else _walk(outer, mask)
+
+
+def hole_orders(occupied: np.ndarray, rows: int, cols: int) -> list[list[int]]:
+    """Cell ids around each empty pocket the occupied region encloses.
+
+    The outer walk has to run round these, so on its own it leaves them inside
+    the outline.  Walking each hole as well keeps the occupied cells on the same
+    side of travel as the outer walk does, which puts the tangents on the empty
+    side, facing into the hole.  Diagonal steps are squared off as they are on
+    the outside, so a square hole gets right-angled corners rather than chamfers.
+    """
+    mask = np.asarray(occupied, dtype=bool).reshape(rows, cols)
+    if not mask.any():
         return []
-    pts = max(contours, key=len).reshape(-1, 2)  # (col, row)
+    _, holes = _trace(mask)
+    return [_walk(h, mask) for h in holes]
+
+
+def _trace(mask: np.ndarray) -> tuple[np.ndarray | None, list[np.ndarray]]:
+    """The longest outer contour of ``mask`` and the holes inside it, as (col, row)."""
+    contours, hierarchy = cv2.findContours(
+        mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE
+    )
+    if not contours or hierarchy is None:
+        return None, []
+    parent = hierarchy[0][:, 3]
+    outer = max(np.flatnonzero(parent < 0), key=lambda i: len(contours[i]))
+    holes = [contours[i].reshape(-1, 2) for i in np.flatnonzero(parent == outer)]
+    return contours[outer].reshape(-1, 2), holes
+
+
+def _walk(pts: np.ndarray, mask: np.ndarray) -> list[int]:
+    cols = mask.shape[1]
     uv = [(int(x), int(y)) for x, y in pts]
     if len(uv) < 3:
         return [y * cols + x for x, y in uv]
     # findContours walks an outer boundary the opposite way round from what the
-    # tangent walk expects.  Reverse unconditionally: a shoelace test would be
-    # fooled by the zero-area spurs a one-cell-wide arm leaves in the polygon.
+    # tangent walk expects, and a hole the opposite way round from its outer
+    # boundary -- which is what the walk wants too, so both get reversed.
+    # Reverse unconditionally: a shoelace test would be fooled by the zero-area
+    # spurs a one-cell-wide arm leaves in the polygon.
     uv.reverse()
     uv = _square_off(uv, mask)
     return [v * cols + u for u, v in uv]
