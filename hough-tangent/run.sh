@@ -28,7 +28,10 @@ SRC="$1"; shift
 if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
   DST="$1"; shift
 else
-  DST="out/$(basename "${SRC%.*}")_tangent.mp4"
+  # 默认放桌面；没有桌面的机器（比如 Linux 服务器）退回 out/
+  OUT_DIR="$HOME/Desktop"
+  [ -d "$OUT_DIR" ] || OUT_DIR="out"
+  DST="$OUT_DIR/$(basename "${SRC%.*}")_tangent.mp4"
 fi
 
 exec ./.venv/bin/python -m hough_tangent "$SRC" -o "$DST" "$@"

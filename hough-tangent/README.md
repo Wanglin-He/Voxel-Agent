@@ -15,7 +15,7 @@ cd ~/Projects/Voxel-Agent/hough-tangent
 ./run.sh ~/Desktop/你的视频.mov
 ```
 
-输出会落在 `out/你的视频_tangent.mp4`。想指定输出路径就写第二个参数：
+输出默认放在桌面：`~/Desktop/你的视频_tangent.mp4`（没有桌面文件夹的机器上退回 `out/`）。想指定输出路径就写第二个参数：
 
 ```bash
 ./run.sh ~/Desktop/你的视频.mov ~/Desktop/结果.mp4
